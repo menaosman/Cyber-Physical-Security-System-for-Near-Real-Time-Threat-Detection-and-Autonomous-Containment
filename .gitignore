@@ -1,0 +1,20 @@
+# Python
+campus-security-system/venv/
+**/__pycache__/
+*.pyc
+
+# Secrets / env
+.env
+
+# Certificates (NEVER commit private keys!)
+campus-security-system/config/certificates/*.key
+campus-security-system/config/certificates/*.crt
+campus-security-system/config/certificates/*.csr
+campus-security-system/config/certificates/*.srl
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
