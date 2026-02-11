@@ -2,6 +2,8 @@
 campus-security-system/venv/
 **/__pycache__/
 *.pyc
+*.pyo
+*.pyd
 
 # Secrets / env
 .env
