@@ -1,0 +1,32 @@
+gateway:
+  id: "GW-TEST-01"
+  location: "TestLab"
+
+mqtt:
+  broker: "localhost"
+  port: 8883
+  subscribe_topic: "sensors/academic/floor1/#"   # ✅ wildcard
+  tls:
+    ca: "config/certificates/ca.crt"
+    cert: "config/certificates/gateway-agent.crt"
+    key: "config/certificates/gateway-agent.key"
+
+sensors:
+  whitelist:
+    - "GAS-TEST-01"
+    - "GAS-ACADEMIC-F1-LABA-01"
+
+thresholds:
+  gas:
+    medium: 300
+    high: 450
+    sustained_duration_sec: 10
+    min_sustained_points: 3
+
+kafka:
+  enabled: true
+  bootstrap_servers: "localhost:9092"
+  topics:
+    high: "alerts-high"
+    medium: "alerts-medium"
+    low: "telemetry-normal"

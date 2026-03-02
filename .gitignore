@@ -13,6 +13,7 @@ campus-security-system/config/certificates/*.key
 campus-security-system/config/certificates/*.crt
 campus-security-system/config/certificates/*.csr
 campus-security-system/config/certificates/*.srl
+campus-security-system/mosquitto/data/mosquitto.db
 
 # Logs
 *.log
