@@ -1,5 +1,22 @@
+###############################################################################
+# MASS — Multi-Agent Security System
+# docker-compose.yml  (drop-in replacement / upgrade for existing compose)
+#
+# Services added vs original:
+#   mongodb      — stores alerts, incidents, access logs
+#   influxdb     — time-series sensor telemetry
+#   grafana      — dashboards (4 panels Phase 3, 8 panels Phase 4)
+#   postgres     — managers relational database
+#   kafka-ui     — dev-only Kafka topic browser
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f behavioral-agent
+###############################################################################
+
 services:
 
+  # ── Messaging: MQTT ────────────────────────────────────────────────────────
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: campus-mosquitto
@@ -11,7 +28,14 @@ services:
       - ../mosquitto/log:/mosquitto/log
       - ../config/certificates:/mosquitto/certs
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-p", "8883",
+             "--cafile", "/mosquitto/certs/ca.crt", "-i", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
+  # ── Messaging: Kafka ───────────────────────────────────────────────────────
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: campus-zookeeper
@@ -21,12 +45,18 @@ services:
     ports:
       - "2181:2181"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: campus-kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
     environment:
@@ -34,4 +64,179 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: campus-zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168     # keep 7 days of events
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ── Dev tool: Kafka UI (disable in prod) ──────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: campus-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: campus
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: campus-kafka:9092
+    restart: unless-stopped
+    profiles: ["dev"]   # only starts with: docker compose --profile dev up
+
+  # ── Database: MongoDB (alerts + incidents + access logs) ──────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: campus-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: massadmin
+      MONGO_INITDB_ROOT_PASSWORD: masspass
+      MONGO_INITDB_DATABASE: mass
+    volumes:
+      - mongodb_data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d   # seed collections on first start
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Database: InfluxDB (time-series sensor telemetry) ─────────────────────
+  influxdb:
+    image: influxdb:2.7
+    container_name: campus-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: massadmin
+      DOCKER_INFLUXDB_INIT_PASSWORD: masspass123
+      DOCKER_INFLUXDB_INIT_ORG: campus-security
+      DOCKER_INFLUXDB_INIT_BUCKET: iot-telemetry
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: campus-influx-token-changeme
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Database: PostgreSQL (managers relational data) ────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: campus-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: mass
+      POSTGRES_USER: massadmin
+      POSTGRES_PASSWORD: masspass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../managers_database/docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U massadmin -d mass"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Visualization: Grafana ─────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.3.1
+    container_name: campus-grafana
+    depends_on:
+      influxdb:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: masspass
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Phase 1: IoT Agents ────────────────────────────────────────────────────
+  gateway-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    container_name: campus-gateway-agent
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    environment:
+      AGENT_ID: gateway-agent-01
+      KAFKA_BOOTSTRAP: campus-kafka:9092
+      MQTT_BROKER: campus-mosquitto
+      HEALTH_PORT: "8000"
+    ports:
+      - "8000:8000"
+    command: ["python", "-m", "agents.iot.gateway_agent.main"]
+    restart: unless-stopped
+
+  behavioral-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    container_name: campus-behavioral-agent
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      AGENT_ID: behavioral-agent-01
+      KAFKA_BOOTSTRAP: campus-kafka:9092
+      HEALTH_PORT: "8001"
+      IF_CONTAMINATION: "0.05"
+      MIN_TRAIN_SAMPLES: "50"
+      ANOMALY_SCORE_THRESHOLD: "-0.15"
+    ports:
+      - "8001:8001"
+    command: ["python", "-m", "agents.iot.behavioral_agent.main"]
+    restart: unless-stopped
+
+  iot-local-manager:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent
+    container_name: campus-iot-local-manager
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      MANAGER_ID: iot-local-manager-01
+      KAFKA_BOOTSTRAP: campus-kafka:9092
+      HEALTH_PORT: "8010"
+      HEARTBEAT_TIMEOUT_SEC: "20"
+      APPROVAL_WINDOW_SEC: "60"
+    ports:
+      - "8010:8010"
+    command: ["python", "-m", "managers.iot_local_manager.main"]
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+  influxdb_data:
+  postgres_data:
+  grafana_data:
