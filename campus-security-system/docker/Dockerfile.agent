@@ -1,0 +1,35 @@
+###############################################################################
+# Dockerfile.agent
+# Single image for ALL MASS Python agents and managers.
+# Build context: campus-security-system/  (one level above docker/)
+#
+# Usage (from docker/):
+#   docker compose up -d
+###############################################################################
+
+FROM python:3.12-slim
+
+# System deps: gcc for confluent-kafka, curl for healthchecks
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc libssl-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python deps first (layer-cached unless requirements.txt changes)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy full project source
+COPY . .
+
+# Create non-root user for security
+RUN useradd -r -u 1001 -g root massagent \
+    && chown -R massagent:root /app
+USER massagent
+
+# Default healthcheck — each service overrides HEALTH_PORT
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:${HEALTH_PORT:-8000}/health || exit 1
+
+# No default CMD — each service in docker-compose sets its own command
