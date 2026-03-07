@@ -100,14 +100,14 @@ class FullAttackScenario:
         print("━" * 78)
         time.sleep(self._delay)
 
-        self._pub(Topics.PAC_EVENTS,
+        self._pub("pac.events",
                   self._access("DEADBEEF", "door4", 2, "Academic",
                                "denied", "unknown",
                                scenario="unknown_card_server_room"),
                   "Unknown RFID card at server room door [T1078]")
 
         for i in range(4):
-            self._pub(Topics.PAC_EVENTS,
+            self._pub("pac.events",
                       self._access(f"UNKNOWN{i:02d}", "door4", 2, "Academic",
                                    "denied", "unknown",
                                    scenario="brute_force_rfid"),
@@ -120,14 +120,14 @@ class FullAttackScenario:
         print("━" * 78)
         time.sleep(self._delay)
 
-        self._pub(Topics.IOT_TELEMETRY,
+        self._pub("iot.telemetry",
                   self._sensor("DHT22-ACADEMIC-F1-LABA-01", "temperature",
                                55.2, "celsius", "GW-ACADEMIC-F1-01",
                                "Academic/Floor1/LabA",
                                scenario="temperature_spike"),
                   "Temperature spike: 55.2°C in Lab A [T0830]")
 
-        self._pub(Topics.IOT_TELEMETRY,
+        self._pub("iot.telemetry",
                   self._sensor("MQ2-ACADEMIC-F1-LABA-01", "gas",
                                520, "ppm", "GW-ACADEMIC-F1-01",
                                "Academic/Floor1/LabA",
@@ -135,7 +135,7 @@ class FullAttackScenario:
                   "Gas anomaly: 520ppm in Lab A [T0830]")
 
         for i in range(3):
-            self._pub(Topics.IOT_TELEMETRY,
+            self._pub("iot.telemetry",
                       self._sensor("MQ2-ACADEMIC-F1-LABA-01", "gas",
                                    490 + i*10, "ppm", "GW-ACADEMIC-F1-01",
                                    "Academic/Floor1/LabA"),
@@ -150,7 +150,7 @@ class FullAttackScenario:
 
         # Port scan — publish in bulk, count as one step
         for port in range(8000, 8022):
-            self._prod.publish(Topics.DATA_TELEMETRY,
+            self._prod.publish("data.telemetry",
                                self._flow(ATTACKER_IP, SERVER_IP, port,
                                          status="S0", bytes_out=64,
                                          scenario="port_scan"),
@@ -163,7 +163,7 @@ class FullAttackScenario:
 
         # Brute force SSH
         for i in range(12):
-            self._prod.publish(Topics.DATA_TELEMETRY,
+            self._prod.publish("data.telemetry",
                                self._flow(ATTACKER_IP, SERVER_IP, 22,
                                          status="REJ", bytes_out=128,
                                          scenario="brute_force_ssh"),
@@ -179,13 +179,13 @@ class FullAttackScenario:
                                 (WORKSTATION, "10.0.12.30", 22),
                                 (WORKSTATION, SERVER_IP,    3389),
                                 (WORKSTATION, "10.0.15.10", 443)]:
-            self._pub(Topics.DATA_TELEMETRY,
+            self._pub("data.telemetry",
                       self._flow(src, dst, port, scenario="lateral_movement"),
                       f"Lateral movement: {src} → {dst}:{port} [T1021]")
 
         # Ransomware
         for i in range(25):
-            self._prod.publish(Topics.DATA_TELEMETRY,
+            self._prod.publish("data.telemetry",
                                self._endpoint(SERVER_IP, "file_op",
                                              proc_name="cryptor.exe",
                                              file_path=f"/data/file_{i:04d}.locked",
@@ -199,7 +199,7 @@ class FullAttackScenario:
         time.sleep(self._delay)
 
         # Credential dump
-        self._pub(Topics.DATA_TELEMETRY,
+        self._pub("data.telemetry",
                   self._endpoint(SERVER_IP, "process",
                                  proc_name="mimikatz.exe",
                                  cmd_line="mimikatz privilege::debug sekurlsa::logonpasswords",
@@ -207,7 +207,7 @@ class FullAttackScenario:
                                  scenario="credential_dump"),
                   "Credential dump via mimikatz [T1003]")
 
-        self._pub(Topics.DATA_TELEMETRY,
+        self._pub("data.telemetry",
                   self._endpoint(SERVER_IP, "file_op",
                                  proc_name="procdump.exe",
                                  file_path="/etc/shadow",
@@ -216,7 +216,7 @@ class FullAttackScenario:
                   "Shadow file read attempt [T1003.008]")
 
         # Data exfiltration — the final blow
-        self._pub(Topics.DATA_TELEMETRY,
+        self._pub("data.telemetry",
                   self._flow(SERVER_IP, "185.220.101.5", 443,
                              bytes_out=83_886_080,
                              scenario="data_exfiltration"),
@@ -233,7 +233,7 @@ class FullAttackScenario:
   Total events published : {self._events_published}
   Time elapsed           : {elapsed}s
   Attack vectors         : 3 (IoT + Physical Access + Data Network)
-  Kafka topics used      : {Topics.IOT_TELEMETRY}, {Topics.PAC_EVENTS}, {Topics.DATA_TELEMETRY}
+  Kafka topics used      : iot.telemetry, pac.events, data.telemetry
 
   Now watch the agents respond:
   ─────────────────────────────────────────────────────────────────
